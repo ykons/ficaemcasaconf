@@ -6,12 +6,18 @@ cache:
   paths:
     - ./.m2/repository/
     - target/
-
+    
 stages:
   - tests
   - build
   - image
-  
+  - push
+  - deploy
+  - loadtest
+  - acceptance
+  - security
+  - notify
+
 1-smoke:
   stage: tests
   tags:
@@ -22,7 +28,7 @@ stages:
     GIT_STRATEGY: none
   script:
     - echo running smoke test || true
-    
+
 2-unit:
   stage: tests
   tags:
@@ -87,7 +93,7 @@ java_build:
     - docker build -f Dockerfile -t $NEXUS_REPO:$NEXUS_PORT_PUSH/demo:$CI_PIPELINE_ID .
     - docker build -f Dockerfile -t $NEXUS_REPO:$NEXUS_PORT_PUSH/demo:latest .
 
-2-docker_sec:
+2-docker_check:
   stage: image
   tags:
     - shell
@@ -106,4 +112,75 @@ java_build:
     - master
   script:
     - echo "Limpando imagens antigas e mantenas apenas latest e $CI_PIPELINE_ID"
-    - for i in `docker images|grep demo|egrep -v '(latest|$CI_PIPELINE_ID)' | awk '{ print $3 }'`;do docker rmi -f $i;done
+    - for i in `docker images|grep $NEXUS_IMAGE_NAME|egrep -v '(latest|$CI_PIPELINE_ID)' | awk '{ print $3 }'`;do docker rmi -f $i;done
+
+docker_push:
+  stage: push
+  tags:
+    - shell
+  script:
+    - docker login -u $NEXUS_USER -p $NEXUS_PASS https://$NEXUS_REPO:$NEXUS_PORT_PUSH
+    - docker push $NEXUS_REPO:$NEXUS_PORT_PUSH/demo:$CI_PIPELINE_ID
+    
+kubernetes:
+  stage: deploy
+  tags:
+    - docker
+  image:
+    name: bitnami/kubectl:1.14
+    entrypoint: [""]
+  before_script:
+    - echo $KUBE_CREDENTIALS | base64 -d > config
+    - export KUBECONFIG=config
+  script:
+    - kubectl set image -n $K8S_NAMESPACE deployment/$K8S_APP $K8S_APP=$NEXUS_REPO:$NEXUS_PORT_PULL/demo:$CI_PIPELINE_ID
+
+load:
+  stage: loadtest
+  tags:
+    - docker
+  only:
+    - master
+  dependencies:
+    - kubernetes
+  image:
+    name: loadimpact/k6:latest
+    entrypoint: [""]
+  script:
+    - echo "executing k6 againt site with 9000 requests in 30s..."
+    - k6 run ./loadtests/performance-test.js
+
+selenium:
+  stage: acceptance
+  tags:
+    - shell
+  only:
+    - master
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - echo running selenium acceptance tests || true
+
+cve_scanner:
+  stage: security
+  tags:
+    - shell
+  only:
+    - master
+  dependencies:
+    - selenium
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - echo running a security scanner || true
+
+notifying_teams:
+  stage: notify
+  tags:
+    - shell
+  only:
+    - master
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - echo notifying teams || true
