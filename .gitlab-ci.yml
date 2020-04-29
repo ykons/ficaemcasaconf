@@ -1,0 +1,14 @@
+stages:
+  - tests
+  
+1-smoke:
+  stage: tests
+  tags:
+    - shell
+  only:
+    - master
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - echo running smoke test || true
+    
