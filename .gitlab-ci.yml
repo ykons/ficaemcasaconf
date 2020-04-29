@@ -10,7 +10,7 @@ cache:
 stages:
   - tests
   - build
-  - images
+  - image
   
 1-smoke:
   stage: tests
